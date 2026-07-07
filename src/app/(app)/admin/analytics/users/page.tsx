@@ -1,0 +1,349 @@
+/*
+This file is part of FeatherPanel.
+
+Copyright (C) 2025 MythicalSystems Studios
+Copyright (C) 2025 FeatherPanel Contributors
+Copyright (C) 2025 Cassian Gherman (aka NaysKutzu)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+See the LICENSE file or <https://www.gnu.org/licenses/>.
+*/
+
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { useTranslation } from '@/contexts/TranslationContext';
+import api from '@/lib/api';
+import { usePluginWidgets } from '@/hooks/usePluginWidgets';
+import { SimplePieChart, TrendChart } from '@/components/admin/analytics/UserCharts';
+import { ResourceCard } from '@/components/featherui/ResourceCard';
+import { PageHeader } from '@/components/featherui/PageHeader';
+import { WidgetRenderer } from '@/components/server/WidgetRenderer';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Users, UserX, UserCheck, ShieldCheck, ArrowUpRight, ShieldAlert, UserMinus } from 'lucide-react';
+
+interface UserOverview {
+    total: number;
+    active: number;
+    banned: number;
+    verified: number;
+    unverified: number;
+    two_fa_enabled: number;
+    percentage_verified: number;
+    percentage_banned: number;
+    percentage_two_fa: number;
+    percentage_active: number;
+}
+
+interface RoleStats {
+    name: string;
+    value: number;
+}
+
+interface TrendData {
+    date: string;
+    count: number;
+}
+
+interface TopUser {
+    id: number;
+    username: string;
+    email: string;
+    server_count: number;
+    avatar: string;
+}
+
+interface GrowthStats {
+    last_7_days: number;
+    previous_7_days: number;
+    growth_rate_7d: number;
+    last_30_days: number;
+    previous_30_days: number;
+    growth_rate_30d: number;
+}
+
+interface SecurityOverview {
+    fully_secured: number;
+    not_secured: number;
+}
+
+export default function UserAnalyticsPage() {
+    const { t } = useTranslation();
+    const { fetchWidgets, getWidgets } = usePluginWidgets('admin-analytics-users');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const [overview, setOverview] = useState<UserOverview | null>(null);
+    const [roles, setRoles] = useState<RoleStats[]>([]);
+    const [registrationTrend, setRegistrationTrend] = useState<TrendData[]>([]);
+    const [topUsers, setTopUsers] = useState<TopUser[]>([]);
+    const [securityStats, setSecurityStats] = useState<{ name: string; value: number }[]>([]);
+    const [securityOverview, setSecurityOverview] = useState<SecurityOverview | null>(null);
+    const [growth, setGrowth] = useState<GrowthStats | null>(null);
+
+    const fetchData = React.useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const [overviewRes, rolesRes, regTrendRes, topUsersRes, securityRes, growthRes] = await Promise.all([
+                api.get('/admin/analytics/users/overview'),
+                api.get('/admin/analytics/users/by-role'),
+                api.get('/admin/analytics/users/registration-trend'),
+                api.get('/admin/analytics/users/top-by-servers'),
+                api.get('/admin/analytics/users/security'),
+                api.get('/admin/analytics/users/growth'),
+            ]);
+
+            setOverview(overviewRes.data.data);
+
+            interface RoleApiResponse {
+                role_display_name: string;
+                user_count: number;
+            }
+
+            const rolesData = (rolesRes.data.data.roles || []).map((r: RoleApiResponse) => ({
+                name: r.role_display_name,
+                value: r.user_count,
+            }));
+            setRoles(rolesData);
+
+            setRegistrationTrend(regTrendRes.data.data.data);
+            setTopUsers(topUsersRes.data.data.users);
+            setGrowth(growthRes.data.data);
+
+            const sec = securityRes.data.data;
+            setSecurityOverview({
+                fully_secured: sec.fully_secured,
+                not_secured: sec.not_secured,
+            });
+            const securityChartData = [
+                { name: t('admin.analytics.users.security_stats.fully_secured'), value: sec.fully_secured },
+                {
+                    name: t('admin.analytics.users.security_stats.email_only'),
+                    value: sec.email_verified - sec.fully_secured,
+                },
+                {
+                    name: t('admin.analytics.users.security_stats.2fa_only'),
+                    value: sec.two_fa_enabled - sec.fully_secured,
+                },
+                { name: t('admin.analytics.users.security_stats.not_secured'), value: sec.not_secured },
+            ].filter((item) => item.value > 0);
+            setSecurityStats(securityChartData);
+        } catch (err) {
+            console.error('Failed to fetch user analytics:', err);
+            setError(t('admin.analytics.users.error'));
+        } finally {
+            setLoading(false);
+        }
+    }, [t]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    useEffect(() => {
+        fetchWidgets();
+    }, [fetchWidgets]);
+
+    if (loading) {
+        return (
+            <div className='flex min-h-[400px] items-center justify-center'>
+                <div className='border-primary h-8 w-8 animate-spin rounded-full border-b-2'></div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className='flex min-h-[400px] flex-col items-center justify-center text-center'>
+                <p className='mb-4 text-red-500'>{error}</p>
+                <button
+                    onClick={fetchData}
+                    className='bg-primary text-primary-foreground rounded-md px-4 py-2 transition-opacity hover:opacity-90'
+                >
+                    {t('admin.analytics.activity.retry')}
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <>
+            <WidgetRenderer widgets={getWidgets('admin-analytics-users', 'top-of-page')} />
+            <div className='space-y-6'>
+                <PageHeader
+                    title={t('admin.analytics.users.title')}
+                    description={t('admin.analytics.users.subtitle')}
+                    icon={Users}
+                />
+
+                {overview && (
+                    <div className='grid gap-6 md:grid-cols-2 lg:grid-cols-4'>
+                        <ResourceCard
+                            title={overview.total.toString()}
+                            subtitle={t('admin.analytics.users.total')}
+                            description={t('admin.analytics.users.active_users', { count: String(overview.active) })}
+                            icon={Users}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                        <ResourceCard
+                            title={overview.banned.toString()}
+                            subtitle={t('admin.analytics.users.banned')}
+                            description={t('admin.analytics.users.banned_pct', {
+                                percentage: String(overview.percentage_banned),
+                            })}
+                            icon={UserX}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                        <ResourceCard
+                            title={overview.verified.toString()}
+                            subtitle={t('admin.analytics.users.verified')}
+                            description={t('admin.analytics.users.verified_pct', {
+                                percentage: String(overview.percentage_verified),
+                            })}
+                            icon={UserCheck}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                        <ResourceCard
+                            title={overview.two_fa_enabled.toString()}
+                            subtitle={t('admin.analytics.users.two_fa')}
+                            description={t('admin.analytics.users.two_fa_pct', {
+                                percentage: String(overview.percentage_two_fa),
+                            })}
+                            icon={ShieldCheck}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                        <ResourceCard
+                            title={overview.unverified.toString()}
+                            subtitle={t('admin.analytics.users.unverified')}
+                            description={t('admin.analytics.users.pending_email_verification')}
+                            icon={UserMinus}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                        <ResourceCard
+                            title={(securityOverview?.not_secured ?? 0).toString()}
+                            subtitle={t('admin.analytics.users.not_secured')}
+                            description={t('admin.analytics.users.fully_secured', {
+                                count: String(securityOverview?.fully_secured ?? 0),
+                            })}
+                            icon={ShieldAlert}
+                            className='bg-card/50 shadow-none! backdrop-blur-sm'
+                        />
+                    </div>
+                )}
+
+                {growth && (
+                    <div className='grid gap-4 md:grid-cols-2'>
+                        <Card className='border-border/50 bg-card/50 shadow-sm backdrop-blur-sm'>
+                            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+                                <CardTitle className='text-sm font-medium'>
+                                    {t('admin.analytics.users.growth_7d')}
+                                </CardTitle>
+                                <ArrowUpRight
+                                    className={`h-4 w-4 ${growth.growth_rate_7d >= 0 ? 'text-green-500' : 'text-red-500'}`}
+                                />
+                            </CardHeader>
+                            <CardContent>
+                                <div className='text-2xl font-bold'>
+                                    {growth.growth_rate_7d > 0 ? '+' : ''}
+                                    {growth.growth_rate_7d}%
+                                </div>
+                                <p className='text-muted-foreground text-xs'>
+                                    {t('admin.analytics.users.growth_comparison', {
+                                        new: String(growth.last_7_days),
+                                        previous: String(growth.previous_7_days),
+                                    })}
+                                </p>
+                            </CardContent>
+                        </Card>
+                        <Card className='border-border/50 bg-card/50 shadow-sm backdrop-blur-sm'>
+                            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+                                <CardTitle className='text-sm font-medium'>
+                                    {t('admin.analytics.users.growth_30d')}
+                                </CardTitle>
+                                <ArrowUpRight
+                                    className={`h-4 w-4 ${growth.growth_rate_30d >= 0 ? 'text-green-500' : 'text-red-500'}`}
+                                />
+                            </CardHeader>
+                            <CardContent>
+                                <div className='text-2xl font-bold'>
+                                    {growth.growth_rate_30d > 0 ? '+' : ''}
+                                    {growth.growth_rate_30d}%
+                                </div>
+                                <p className='text-muted-foreground text-xs'>
+                                    {t('admin.analytics.users.growth_comparison', {
+                                        new: String(growth.last_30_days),
+                                        previous: String(growth.previous_30_days),
+                                    })}
+                                </p>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
+                    <TrendChart
+                        title={t('admin.analytics.users.reg_trend')}
+                        description={t('admin.analytics.users.reg_trend_desc')}
+                        data={registrationTrend}
+                    />
+                    <SimplePieChart
+                        title={t('admin.analytics.users.role_dist')}
+                        description={t('admin.analytics.users.role_dist_desc')}
+                        data={roles}
+                    />
+                </div>
+
+                <div className='grid gap-4 md:grid-cols-1 lg:grid-cols-3'>
+                    <div className='col-span-1'>
+                        <SimplePieChart
+                            title={t('admin.analytics.users.security_stats_title')}
+                            description={t('admin.analytics.users.security_stats_desc')}
+                            data={securityStats}
+                        />
+                    </div>
+
+                    <Card className='border-border/50 bg-card/50 col-span-1 shadow-sm backdrop-blur-sm lg:col-span-2'>
+                        <CardHeader>
+                            <CardTitle>{t('admin.analytics.users.top_users')}</CardTitle>
+                            <CardDescription>{t('admin.analytics.users.top_users_desc')}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {topUsers.length > 0 ? (
+                                <div className='space-y-4'>
+                                    {topUsers.map((user, index) => (
+                                        <div key={user.id} className='flex items-center justify-between'>
+                                            <div className='flex items-center gap-3'>
+                                                <span className='text-muted-foreground w-4 text-sm font-bold'>
+                                                    #{index + 1}
+                                                </span>
+                                                <div className='space-y-0.5'>
+                                                    <p className='text-sm leading-none font-medium'>{user.username}</p>
+                                                    <p className='text-muted-foreground text-xs'>{user.email}</p>
+                                                </div>
+                                            </div>
+                                            <div className='bg-secondary rounded-full px-2.5 py-0.5 text-sm font-medium'>
+                                                {t('admin.analytics.users.servers_count', {
+                                                    count: String(user.server_count),
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className='text-muted-foreground flex justify-center py-8'>
+                                    {t('admin.analytics.activity.no_recent')}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+            <WidgetRenderer widgets={getWidgets('admin-analytics-users', 'bottom-of-page')} />
+        </>
+    );
+}

@@ -1,0 +1,121 @@
+/*
+This file is part of FeatherPanel.
+
+Copyright (C) 2025 MythicalSystems Studios
+Copyright (C) 2025 FeatherPanel Contributors
+Copyright (C) 2025 Cassian Gherman (aka NaysKutzu)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+See the LICENSE file or <https://www.gnu.org/licenses/>.
+*/
+
+'use client';
+
+import { useContext, useState } from 'react';
+import { CircleUser } from 'lucide-react';
+import { useRouter, usePathname } from 'next/navigation';
+import { useSession } from '@/contexts/SessionContext';
+import { useTranslation } from '@/contexts/TranslationContext';
+import { ServerContext } from '@/contexts/ServerContext';
+import { VmInstanceContext } from '@/contexts/VmInstanceContext';
+import Permissions from '@/lib/permissions';
+import { LocalStorageManagerDialog } from '@/components/layout/LocalStorageManagerDialog';
+import { useNavbarHoverReveal } from '@/hooks/useNavbarHoverReveal';
+import { useNavbarSticky } from '@/hooks/useNavbarSticky';
+import { useChromeLayout } from '@/hooks/useChromeLayout';
+import { NavbarClassicChrome, NavbarModernChrome } from '@/components/NavbarChromeVariants';
+import { ServerSwitcher } from '@/components/server/ServerSwitcher';
+
+interface NavbarProps {
+    onMenuClick: () => void;
+}
+
+export default function Navbar({ onMenuClick }: NavbarProps) {
+    const router = useRouter();
+    const pathname = usePathname();
+    const { user, logout, hasPermission } = useSession();
+    const { t } = useTranslation();
+    const serverContext = useContext(ServerContext);
+    const vmInstanceContext = useContext(VmInstanceContext);
+    const isOnServerPage = pathname?.startsWith('/server/');
+    const isOnVdsPage = pathname?.startsWith('/vds/');
+    const isOnAdminPage = pathname?.startsWith('/admin');
+    const serverName = isOnServerPage ? serverContext?.server?.name : null;
+    const isKnowledgeBaseSection = pathname?.startsWith('/dashboard/knowledgebase');
+    const headerTitle = isKnowledgeBaseSection ? t('dashboard.knowledgebase.title') : t('dashboard.title');
+    const headerContent = isOnServerPage ? <ServerSwitcher fallbackTitle={serverName ?? undefined} /> : undefined;
+
+    const userNavigation = [{ name: t('navbar.profile'), href: '/dashboard/account', icon: CircleUser }];
+
+    const handleLogout = async () => {
+        await logout();
+    };
+
+    const getUserInitials = () => {
+        if (!user) return 'U';
+        const u = user.username?.trim();
+        if (u && u.length >= 2) return u.slice(0, 2).toUpperCase();
+        if (u) return u.slice(0, 1).toUpperCase();
+        return 'U';
+    };
+
+    const getUsername = () => {
+        if (!user) return t('navbar.user');
+        return user.username?.trim() || t('navbar.user');
+    };
+
+    const getLegalName = () => {
+        if (!user) return '';
+        const parts = [user.first_name?.trim(), user.last_name?.trim()].filter(Boolean);
+        return parts.join(' ');
+    };
+
+    const [emailRevealed, setEmailRevealed] = useState(false);
+    const [localStorageOpen, setLocalStorageOpen] = useState(false);
+    const { navbarHoverReveal } = useNavbarHoverReveal();
+    const { navbarSticky } = useNavbarSticky();
+    const { chromeLayout } = useChromeLayout();
+
+    const canAccessAdmin = hasPermission(Permissions.ADMIN_DASHBOARD_VIEW);
+    const showAdminAreaButton = canAccessAdmin && !isOnAdminPage;
+    const adminAreaHref =
+        isOnServerPage && serverContext?.server?.id
+            ? `/admin/servers/${serverContext.server.id}/edit`
+            : isOnVdsPage && vmInstanceContext?.instance?.id
+              ? `/admin/vm-instances/${vmInstanceContext.instance.id}/edit`
+              : '/admin';
+
+    const chromeProps = {
+        onMenuClick,
+        headerTitle,
+        headerContent,
+        showAdminAreaButton,
+        adminAreaHref,
+        user,
+        router,
+        userNavigation,
+        t,
+        emailRevealed,
+        setEmailRevealed,
+        setLocalStorageOpen,
+        getUserInitials,
+        getUsername,
+        getLegalName,
+        handleLogout,
+        desktopHoverDock: navbarHoverReveal,
+        navbarSticky,
+    };
+
+    const Chrome = chromeLayout === 'classic' ? NavbarClassicChrome : NavbarModernChrome;
+
+    return (
+        <>
+            <Chrome {...chromeProps} />
+            <LocalStorageManagerDialog open={localStorageOpen} onOpenChange={setLocalStorageOpen} />
+        </>
+    );
+}
